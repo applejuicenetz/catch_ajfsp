@@ -1,0 +1,53 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test ./internal/...
+      - run: |
+          for arch in amd64 arm64; do
+            go run github.com/akavel/rsrc@v0.10.2 -arch $arch -ico cmd/catch_ajfsp/catch_ajfsp.ico \
+              -manifest cmd/catch_ajfsp/catch_ajfsp.manifest -o cmd/catch_ajfsp/resource_windows_$arch.syso
+            GOOS=windows GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -H windowsgui" \
+              -o dist/catch_ajfsp-windows-$arch.exe ./cmd/catch_ajfsp
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: catch_ajfsp
+          path: dist/*.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: catch_ajfsp
+          path: dist
+      - uses: softprops/action-gh-release@v3
+        with:
+          body: Übergibt ajfsp-Links an einen appleJuice Core.
+          fail_on_unmatched_files: true
+          files: dist/*.exe
